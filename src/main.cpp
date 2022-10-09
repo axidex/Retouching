@@ -6,55 +6,23 @@
 #include <dlib/image_processing.h>
 #include <dlib/image_processing/frontal_face_detector.h>
 #include <dlib/opencv.h>
-#include <iostream>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/ximgproc/edge_filter.hpp>
 #include <opencv2/ml.hpp>
+#include <wavelib.h>
 
 #include <ranges>
 #include <tinysplinecxx.h>
 #include <iostream>
 
- /// @brief Command line keys for command line parsing
-static constexpr auto cmdKeys =
-"{help h usage ?   |       | print this message            }"
-"{@image           |<none> | input image                   }"
-"{@landmark_model  |<none> | face landmark detection model }"
-"{images_dir       |       | search path for images        }"
-"{models_dir       |       | search path for models        }";
-
-static void cvHaarWavelet(cv::Mat& src, cv::Mat& dst, int NIter)
-{
-    float c, dh, dv, dd;
-    assert(src.type() == CV_32FC1);
-    assert(dst.type() == CV_32FC1);
-    int width = src.cols;
-    int height = src.rows;
-    for (int k = 0; k < NIter; k++)
-    {
-        for (int y = 0; y < (height >> (k + 1)); y++)
-        {
-            for (int x = 0; x < (width >> (k + 1)); x++)
-            {
-                c = (src.at<float>(2 * y, 2 * x) + src.at<float>(2 * y, 2 * x + 1) + src.at<float>(2 * y + 1, 2 * x) + src.at<float>(2 * y + 1, 2 * x + 1)) * 0.5;
-                dst.at<float>(y, x) = c;
-
-                dh = (src.at<float>(2 * y, 2 * x) + src.at<float>(2 * y + 1, 2 * x) - src.at<float>(2 * y, 2 * x + 1) - src.at<float>(2 * y + 1, 2 * x + 1)) * 0.5;
-                dst.at<float>(y, x + (width >> (k + 1))) = dh;
-
-                dv = (src.at<float>(2 * y, 2 * x) + src.at<float>(2 * y, 2 * x + 1) - src.at<float>(2 * y + 1, 2 * x) - src.at<float>(2 * y + 1, 2 * x + 1)) * 0.5;
-                dst.at<float>(y + (height >> (k + 1)), x) = dv;
-
-                dd = (src.at<float>(2 * y, 2 * x) - src.at<float>(2 * y, 2 * x + 1) - src.at<float>(2 * y + 1, 2 * x) + src.at<float>(2 * y + 1, 2 * x + 1)) * 0.5;
-                dst.at<float>(y + (height >> (k + 1)), x + (width >> (k + 1))) = dd;
-            }
-        }
-        dst.copyTo(src);
-    }
-}
-
+#include <fstream>
+#include <vector>
+#include <string>
+#include <complex>
+#include <cmath>
+#include <algorithm>
 
 
 void GMM(cv::Mat src, cv::Mat& dst) {
@@ -129,39 +97,42 @@ void GMM(cv::Mat src, cv::Mat& dst) {
     cv::imwrite("gmm.jpg", result);
 }
 
+double absmax(double* array, int N) {
+    double max;
+    int i;
 
+    max = 0.0;
+    for (i = 0; i < N; ++i) {
+        if (fabs(array[i]) >= max) {
+            max = fabs(array[i]);
+        }
+    }
+
+    return max;
+}
+
+void medianaa(double* arr1, double* arr2, int row, int col)
+{
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+            arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) / 2;
+            //std::cout  << i << " " << j << " " << row << " " << col <<" " << arr1[i * col + j] << std::endl;
+        }
+    }
+}
 
 /// @brief Bianry skin mask example
 ///
 /// Usage: BinarySkinMask.exe [params] image landmark_model
 int main(int argc, char** argv) {
-    // Handle command line arguments
-    cv::CommandLineParser parser(argc, argv, cmdKeys);
-    parser.about("Bianry skin mask example");
-    if (parser.has("help")) {
-        parser.printMessage();
-        return 0;
-    }
-    if (parser.has("images_dir"))
-        cv::samples::addSamplesDataSearchPath(parser.get<cv::String>("images_dir"));
-    if (parser.has("models_dir"))
-        cv::samples::addSamplesDataSearchPath(parser.get<cv::String>("models_dir"));
-
-    // Load image
-    const auto imgArg = parser.get<cv::String>("@image");
-    if (!parser.check()) {
-        parser.printErrors();
-        parser.printMessage();
-        return -1;
-    }
-    // Set `required=false` to prevent `findFile` from throwing an exception.
-    // Instead, we check whether the image is valid via the `empty` method.
+    
+    std::string imgDir = "1.jpg";
+    std::string modelDir = "shape_predictor_68_face_landmarks.dat";
     const auto inputImg =
-        cv::imread(cv::samples::findFile(imgArg, /*required=*/false, /*silentMode=*/true));
+        cv::imread(cv::samples::findFile(imgDir, /*required=*/false, /*silentMode=*/true));
     if (inputImg.empty()) {
-        std::cout << "Could not open or find the image: " << imgArg << "\n"
+        std::cout << "Could not open or find the image: " << imgDir << "\n"
             << "The image should be located in `images_dir`.\n";
-        parser.printMessage();
         return -1;
     }
     // Make a copy for drawing landmarks
@@ -169,22 +140,13 @@ int main(int argc, char** argv) {
     // Make a copy for drawing binary mask
     cv::Mat maskImg = cv::Mat::zeros(inputImg.size(), CV_8UC1);
 
-    // Load dlib's face landmark detection model
-    const auto landmarkModelArg = parser.get<cv::String>("@landmark_model");
-    if (!parser.check()) {
-        parser.printErrors();
-        parser.printMessage();
-        return -1;
-    }
-    auto landmarkModelPath = cv::samples::findFile(landmarkModelArg, /*required=*/false);
+
+    auto landmarkModelPath = cv::samples::findFile(modelDir, /*required=*/false);
     if (landmarkModelPath.empty()) {
-        std::cout << "Could not find the landmark model file: " << landmarkModelArg << "\n"
+        std::cout << "Could not find the landmark model file: " << modelDir << "\n"
             << "The model should be located in `models_dir`.\n";
-        parser.printMessage();
         return -1;
     }
-
-
 
     ////////////////////////////////////////////////////// ������
 
@@ -399,10 +361,10 @@ int main(int argc, char** argv) {
     int dx = value1 * 5;
     double fc = value1 * 12.5;
     */
-    int dx;
-    double fc;
-    std::cin >> dx;
-    std::cin >> fc;
+    int dx = 5;
+    double fc = 50;
+    //std::cin >> dx;
+    //std::cin >> fc;
     bilateralFilter(spotImg, tmp1, dx, fc, fc);
 
     //cv::Mat gmm;
@@ -420,35 +382,203 @@ int main(int argc, char** argv) {
     cv::imshow("workImg", workImg);
     cv::imwrite("final.jpg", dst);
   
-    //cv::imshow("ma", ma);
-   // cv::imwrite("final.jpg", tmp2);
+    
 
-    /*
-    // Fit image to the screen and show image
-    cv::namedWindow(landmarkWin, cv::WINDOW_NORMAL);
-    cv::setWindowProperty(landmarkWin, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-    const auto [x, y, resW, resH] = cv::getWindowImageRect(landmarkWin);
-    const auto [imgW, imgH] = landmarkImg.size();
-    const auto scaleFactor = 40;
-    const auto scaledW = scaleFactor * resW / 100;
-    const auto scaledH = scaleFactor * imgH * resW / (imgW * 100);
-    cv::resizeWindow(landmarkWin, scaledW, scaledH);*/
-    // Show overlay
-    // cv::Mat maskTmp[3] = {maskImg, maskImg, maskImg};
-    // cv::Mat mask;
-    // cv::merge(maskTmp, 3, mask);
-    // cv::bitwise_and(mask, landmarkImg, landmarkImg);
-    /* cv::imshow(landmarkWin, landmarkImg);
+    
+    ////////////////////////// Spliting into 1 color
 
-    // Show binary skin mask
-    cv::namedWindow(skinMaskWin, cv::WINDOW_NORMAL);
-    cv::setWindowProperty(skinMaskWin, cv::WND_PROP_FULLSCREEN, cv::WINDOW_FULLSCREEN);
-    cv::resizeWindow(skinMaskWin, scaledW, scaledH);
-    cv::moveWindow(skinMaskWin, scaledW, 0);
-    cv::imshow(skinMaskWin, maskImg);
-    */
+    cv::Mat bgrchannel_smoothed[3], bgrchannel_orig[3];
+
+    cv::split(dst.clone(), bgrchannel_smoothed);
+    cv::split(workImg.clone(), bgrchannel_orig);
+
+    cv::Mat blue_double_smoothed, green_double_smoothed, red_double_smoothed, blue_double_orig, green_double_orig, red_double_orig;
+
+    bgrchannel_smoothed[0].convertTo(blue_double_smoothed, CV_64F);
+    bgrchannel_smoothed[1].convertTo(green_double_smoothed, CV_64F);
+    bgrchannel_smoothed[2].convertTo(red_double_smoothed, CV_64F);
+
+    bgrchannel_orig[0].convertTo(blue_double_orig, CV_64F);
+    bgrchannel_orig[1].convertTo(green_double_orig, CV_64F);
+    bgrchannel_orig[2].convertTo(red_double_orig, CV_64F);
+
+    double* red_smoothed = red_double_smoothed.ptr<double>(0);
+    double* green_smoothed = green_double_smoothed.ptr<double>(0);
+    double* blue_smoothed = blue_double_smoothed.ptr<double>(0);
+
+    double* red_orig = red_double_orig.ptr<double>(0);
+    double* green_orig = green_double_orig.ptr<double>(0);
+    double* blue_orig = blue_double_orig.ptr<double>(0);
+
+    ////////////////////////// WAVELET
+
+    // BLUE
+    wave_object obj_blue_smoothed, obj_blue_orig;
+    wt2_object wt_blue_smoothed, wt_blue_orig;
+    
+    int J = 3;
+    double * wavecoeffs_blue_smoothed, * wavecoeffs_blue_orig, * oup_blue;
+    double* cHH1_blue_smoothed, * cHH2_blue_smoothed,* cHH3_blue_smoothed, * cHH1_blue_orig, * cHH2_blue_orig, * cHH3_blue_orig ;
+    int ib1r,  ib1c,  ib2r,  ib2c,  ib3r, ib3c;
+    int ibs1r,  ibs1c,  ibs2r,  ibs2c,  ibs3r,  ibs3c;
+
+    const char* name = "db2";
+    int N = dst.rows * dst.cols;
+    obj_blue_smoothed = wave_init(name);
+    obj_blue_orig = wave_init(name);
+
+    wt_blue_orig = wt2_init(obj_blue_orig, "dwt", workImg.rows, workImg.cols, J);
+    wt_blue_smoothed = wt2_init(obj_blue_smoothed, "dwt", dst.rows, dst.cols, J);
+
+    wavecoeffs_blue_orig = dwt2(wt_blue_orig, blue_orig);
+    wavecoeffs_blue_smoothed = dwt2(wt_blue_smoothed, blue_smoothed);
+
+    cHH1_blue_orig = getWT2Coeffs(wt_blue_orig, wavecoeffs_blue_orig, 1, 'D', &ib1r, &ib1c);
+    cHH2_blue_orig = getWT2Coeffs(wt_blue_orig, wavecoeffs_blue_orig, 2, 'D', &ib2r, &ib2c);
+    cHH3_blue_orig = getWT2Coeffs(wt_blue_orig, wavecoeffs_blue_orig, 3, 'D', &ib3r, &ib3c);
+
+    cHH1_blue_smoothed = getWT2Coeffs(wt_blue_smoothed, wavecoeffs_blue_smoothed, 1, 'D', &ibs1r, &ibs1c);
+    cHH2_blue_smoothed = getWT2Coeffs(wt_blue_smoothed, wavecoeffs_blue_smoothed, 2, 'D', &ibs2r, &ibs2c);
+    cHH3_blue_smoothed = getWT2Coeffs(wt_blue_smoothed, wavecoeffs_blue_smoothed, 3, 'D', &ibs3r, &ibs3c);
+
+    //dispWT2Coeffs(cHH1s, i1r, i1c);
+    std::cout << ibs1r << " " << ibs1c << std::endl;
+
+   //medianaa(cHH1_blue_orig, cHH1_blue_smoothed, ibs1r, ibs1c);
+   //medianaa(cHH2_blue_orig, cHH2_blue_smoothed, ibs2r, ibs2c);
+   //medianaa(cHH3_blue_orig, cHH3_blue_smoothed, ibs3r, ibs3c);
+
+   oup_blue = (double*)calloc(N, sizeof(double));
+   for (int i = 0; i < dst.rows; ++i) {
+       for (int k = 0; k < dst.cols; ++k) {
+           oup_blue[i * dst.cols + k] = 0.0;
+       }
+   }
+   idwt2(wt_blue_smoothed, wavecoeffs_blue_smoothed, oup_blue);
+
+   // GREEN
+   wave_object obj_green_smoothed, obj_green_orig;
+   wt2_object wt_green_smoothed, wt_green_orig;
+
+   double* wavecoeffs_green_smoothed, * wavecoeffs_green_orig, * oup_green;
+   double* cHH1_green_smoothed, * cHH2_green_smoothed, * cHH3_green_smoothed, * cHH1_green_orig, * cHH2_green_orig, * cHH3_green_orig;
+   int ig1r, ig1c, ig2r, ig2c, ig3r, ig3c;
+   int igs1r, igs1c, igs2r, igs2c, igs3r, igs3c;
+
+   obj_green_smoothed = wave_init(name);
+   obj_green_orig = wave_init(name);
+
+   wt_green_orig = wt2_init(obj_green_orig, "dwt", workImg.rows, workImg.cols, J);
+   wt_green_smoothed = wt2_init(obj_green_smoothed, "dwt", dst.rows, dst.cols, J);
+
+   wavecoeffs_green_orig = dwt2(wt_green_orig, green_orig);
+   wavecoeffs_green_smoothed = dwt2(wt_green_smoothed, green_smoothed);
+
+   cHH1_green_orig = getWT2Coeffs(wt_green_orig, wavecoeffs_green_orig, 1, 'D', &ig1r, &ig1c);
+   cHH2_green_orig = getWT2Coeffs(wt_green_orig, wavecoeffs_green_orig, 2, 'D', &ig2r, &ig2c);
+   cHH3_green_orig = getWT2Coeffs(wt_green_orig, wavecoeffs_green_orig, 3, 'D', &ig3r, &ig3c);
+
+   cHH1_green_smoothed = getWT2Coeffs(wt_green_smoothed, wavecoeffs_green_smoothed, 1, 'D', &igs1r, &igs1c);
+   cHH2_green_smoothed = getWT2Coeffs(wt_green_smoothed, wavecoeffs_green_smoothed, 2, 'D', &igs2r, &igs2c);
+   cHH3_green_smoothed = getWT2Coeffs(wt_green_smoothed, wavecoeffs_green_smoothed, 3, 'D', &igs3r, &igs3c);
+
+   //medianaa(cHH1_green_orig, cHH1_green_smoothed, igs1r, igs1c);
+   //medianaa(cHH2_green_orig, cHH2_green_smoothed, igs2r, igs2c);
+   //medianaa(cHH3_green_orig, cHH3_green_smoothed, igs3r, igs3c);
+
+   oup_green = (double*)calloc(N, sizeof(double));
+   for (int i = 0; i < dst.rows; ++i) {
+       for (int k = 0; k < dst.cols; ++k) {
+           oup_green[i * dst.cols + k] = 0.0;
+       }
+   }
+   idwt2(wt_green_smoothed, wavecoeffs_green_smoothed, oup_green);
+
+    // RED
+   wave_object obj_red_smoothed, obj_red_orig;
+   wt2_object wt_red_smoothed, wt_red_orig;
+
+   double* wavecoeffs_red_smoothed, * wavecoeffs_red_orig, * oup_red;
+   double* cHH1_red_smoothed, * cHH2_red_smoothed, * cHH3_red_smoothed, * cHH1_red_orig, * cHH2_red_orig, * cHH3_red_orig;
+   int ir1r, ir1c, ir2r, ir2c, ir3r, ir3c;
+   int irs1r, irs1c, irs2r, irs2c, irs3r, irs3c;
+
+   obj_red_smoothed = wave_init(name);
+   obj_red_orig = wave_init(name);
+
+   wt_red_orig = wt2_init(obj_red_orig, "dwt", workImg.rows, workImg.cols, J);
+   wt_red_smoothed = wt2_init(obj_red_smoothed, "dwt", dst.rows, dst.cols, J);
+
+   wavecoeffs_red_orig = dwt2(wt_red_orig, red_orig);
+   wavecoeffs_red_smoothed = dwt2(wt_red_smoothed, red_smoothed);
+
+   cHH1_red_orig = getWT2Coeffs(wt_red_orig, wavecoeffs_red_orig, 1, 'D', &ir1r, &ir1c);
+   cHH2_red_orig = getWT2Coeffs(wt_red_orig, wavecoeffs_red_orig, 2, 'D', &ir2r, &ir2c);
+   cHH3_red_orig = getWT2Coeffs(wt_red_orig, wavecoeffs_red_orig, 3, 'D', &ir3r, &ir3c);
+
+   cHH1_red_smoothed = getWT2Coeffs(wt_red_smoothed, wavecoeffs_red_smoothed, 1, 'D', &irs1r, &irs1c);
+   cHH2_red_smoothed = getWT2Coeffs(wt_red_smoothed, wavecoeffs_red_smoothed, 2, 'D', &irs2r, &irs2c);
+   cHH3_red_smoothed = getWT2Coeffs(wt_red_smoothed, wavecoeffs_red_smoothed, 3, 'D', &irs3r, &irs3c);
+
+   //medianaa(cHH1_red_orig, cHH1_red_smoothed, irs1r, irs1c);
+   //medianaa(cHH2_red_orig, cHH2_red_smoothed, irs2r, irs2c);
+   //medianaa(cHH3_red_orig, cHH3_red_smoothed, irs3r, irs3c);
+
+   oup_red = (double*)calloc(N, sizeof(double));
+   for (int i = 0; i < dst.rows; ++i) {
+       for (int k = 0; k < dst.cols; ++k) {
+           oup_red[i * dst.cols + k] = 0.0;
+       }
+   }
+   idwt2(wt_green_smoothed, wavecoeffs_green_smoothed, oup_green);
+   // End of wavelet
+
+   cv::Mat final_blue(dst.rows, dst.cols, CV_64F, oup_blue);
+   cv::Mat final_green(dst.rows, dst.cols, CV_64F, oup_green);
+   cv::Mat final_red(dst.rows, dst.cols, CV_64F, oup_red);
+
+   cv::Mat convertedMat_blue, convertedMat_green, convertedMat_red;
+   final_blue.convertTo(convertedMat_blue, CV_8U);
+   final_green.convertTo(convertedMat_green, CV_8U);
+   final_red.convertTo(convertedMat_red, CV_8U);
+
+   cv::Mat waveChannels[3] = { convertedMat_green, convertedMat_red, convertedMat_blue };
+
+   cv::Mat final_colors;
+   cv::merge(waveChannels, 3, final_colors);
+
+   cv::imshow("FINALLY", final_colors);
+
+
     cv::waitKey();
     cv::destroyAllWindows();
 
+
+    // free blue 
+    wave_free(obj_blue_smoothed);
+    wt2_free(wt_blue_smoothed);
+    wave_free(obj_blue_orig);
+    wt2_free(wt_blue_orig);
+    free(wavecoeffs_blue_orig);
+    free(wavecoeffs_blue_smoothed);
+    free(oup_blue);
+
+    // free green
+    wave_free(obj_green_smoothed);
+    wt2_free(wt_green_smoothed);
+    wave_free(obj_green_orig);
+    wt2_free(wt_green_orig);
+    free(wavecoeffs_green_orig);
+    free(wavecoeffs_green_smoothed);
+    free(oup_green);
+
+    // free red
+    wave_free(obj_red_smoothed);
+    wt2_free(wt_red_smoothed);
+    wave_free(obj_red_orig);
+    wt2_free(wt_red_orig);
+    free(wavecoeffs_red_orig);
+    free(wavecoeffs_red_smoothed);
+    free(oup_red);
     return 0;
 }
