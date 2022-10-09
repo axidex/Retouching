@@ -337,7 +337,7 @@ std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
         cHH3_smoothed = getWT2Coeffs(wt_smoothed, wavecoeffs_smoothed, 3, 'D', &is3r, &is3c);
 
         //dispWT2Coeffs(cHH1s, i1r, i1c);
-        std::cout << is1r << " " << is1c << std::endl;
+        //std::cout << is1r << " " << is1c << std::endl;
 
         mid(cHH1_orig, cHH1_smoothed, is1r, is1c);
         mid(cHH2_orig, cHH2_smoothed, is2r, is2c);
@@ -349,7 +349,7 @@ std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
         idwt2(wt_smoothed, wavecoeffs_smoothed, oup);
         
         colors.push_back(oupMat);
-        std::cout << color << std::endl;
+        //std::cout << color << std::endl;
         wave_free(obj_orig);
         wt2_free(wt_orig);
         free(wavecoeffs_orig);
@@ -366,7 +366,9 @@ std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
 
 int main(int argc, char** argv) {
     
-    std::string imgDir = "2.jpg";
+    std::string imgDir;
+    std::cout << "Dir: ";
+    std::cin >> imgDir;
     std::string modelDir = "shape_predictor_68_face_landmarks.dat";
     
   
