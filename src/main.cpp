@@ -1,8 +1,3 @@
-/**
- * @file BinarySkinMask.cpp
- * @brief An example of how to create a binary skin mask from face landmark locations.
- *
- */
 #include <dlib/image_processing.h>
 #include <dlib/image_processing/frontal_face_detector.h>
 #include <dlib/opencv.h>
@@ -13,89 +8,19 @@
 #include <opencv2/ml.hpp>
 #include <wavelib.h>
 
+
 #include <ranges>
 #include <tinysplinecxx.h>
 #include <iostream>
 
+#include <cassert>
 #include <fstream>
 #include <vector>
 #include <string>
 #include <complex>
 #include <cmath>
 #include <algorithm>
-
-
-void GMM(cv::Mat src, cv::Mat& dst) {
-    // Define 5 colors with a maximum classification of no more than 5
-    cv::Scalar color_tab[] = { cv::Scalar(0, 0, 255), cv::Scalar(0, 255, 0),
-                              cv::Scalar(255, 0, 0), cv::Scalar(0, 255, 255),
-                              cv::Scalar(255, 0, 255) };
-
-    int width = src.cols;
-    int height = src.rows;
-    int dims = src.channels();
-
-    int nsamples = width * height;
-    cv::Mat points(nsamples, dims, CV_64FC1);
-    cv::Mat labels;
-    cv::Mat result = cv::Mat::zeros(src.size(), CV_8UC3);
-
-    // Define classification, that is, how many classification points of function K value
-    int num_cluster = 3;
-    printf("num of num_cluster is %d\n", num_cluster);
-    // Image RGB pixel data to sample data
-    int index = 0;
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            index = row * width + col;
-            cv::Vec3b rgb = src.at<cv::Vec3b>(row, col);
-            points.at<double>(index, 0) = static_cast<int>(rgb[0]);
-            points.at<double>(index, 1) = static_cast<int>(rgb[1]);
-            points.at<double>(index, 2) = static_cast<int>(rgb[2]);
-        }
-    }
-
-    // EM Cluster Train
-    cv::Ptr<cv::ml::EM> em_model = cv::ml::EM::create();
-    // Partition number
-    em_model->setClustersNumber(num_cluster);
-    // Set covariance matrix type
-    em_model->setCovarianceMatrixType(cv::ml::EM::COV_MAT_SPHERICAL);
-    // Set convergence conditions
-    em_model->setTermCriteria(
-        cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 100, 0.1));
-    // Store the probability partition to labs EM according to the sample training
-    em_model->trainEM(points, cv::noArray(), labels, cv::noArray());
-
-    // Mark color and display for each pixel
-    cv::Mat sample(1, dims, CV_64FC1); //
-    int r = 0, g = 0, b = 0;
-    // Put each pixel in the sample
-    for (int row = 0; row < height; row++) {
-        for (int col = 0; col < width; col++) {
-            index = row * width + col;
-
-            // Get the color of each channel
-            b = src.at<cv::Vec3b>(row, col)[0];
-            g = src.at<cv::Vec3b>(row, col)[1];
-            r = src.at<cv::Vec3b>(row, col)[2];
-
-            // Put pixels in sample data
-            sample.at<double>(0, 0) = static_cast<double>(b);
-            sample.at<double>(0, 1) = static_cast<double>(g);
-            sample.at<double>(0, 2) = static_cast<double>(r);
-
-            // Rounding
-            int response = cvRound(em_model->predict2(sample, cv::noArray())[1]);
-            cv::Scalar c = color_tab[response];
-            result.at<cv::Vec3b>(row, col)[0] = c[0];
-            result.at<cv::Vec3b>(row, col)[1] = c[1];
-            result.at<cv::Vec3b>(row, col)[2] = c[2];
-        }
-    }
-    cv::imshow("gmm", result);
-    cv::imwrite("gmm.jpg", result);
-}
+#include <memory>
 
 double absmax(double* array, int N) {
     double max;
@@ -111,29 +36,26 @@ double absmax(double* array, int N) {
     return max;
 }
 
-void medianaa(double* arr1, double* arr2, int row, int col)
+void mid(double* arr1, double* arr2, int row, int col)
 {
     for (int i = 0; i < row; ++i) {
         for (int j = 0; j < col; ++j) {
-            arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) / 2;
+            
+            //arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) * 0.5;
+            arr2[i * col + j] = arr1[i * col + j];
             //std::cout  << i << " " << j << " " << row << " " << col <<" " << arr1[i * col + j] << std::endl;
         }
     }
 }
 
-/// @brief Bianry skin mask example
-///
-/// Usage: BinarySkinMask.exe [params] image landmark_model
-int main(int argc, char** argv) {
-    
-    std::string imgDir = "1.jpg";
-    std::string modelDir = "shape_predictor_68_face_landmarks.dat";
+std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
+{
     const auto inputImg =
         cv::imread(cv::samples::findFile(imgDir, /*required=*/false, /*silentMode=*/true));
     if (inputImg.empty()) {
         std::cout << "Could not open or find the image: " << imgDir << "\n"
             << "The image should be located in `images_dir`.\n";
-        return -1;
+        assert(false);
     }
     // Make a copy for drawing landmarks
     cv::Mat landmarkImg = inputImg.clone();
@@ -145,14 +67,12 @@ int main(int argc, char** argv) {
     if (landmarkModelPath.empty()) {
         std::cout << "Could not find the landmark model file: " << modelDir << "\n"
             << "The model should be located in `models_dir`.\n";
-        return -1;
+        assert(false);
     }
-
-    ////////////////////////////////////////////////////// ������
 
     // Leave the original input image untouched
     cv::Mat workImg = inputImg.clone();
-    
+
     dlib::shape_predictor landmarkDetector;
     dlib::deserialize(landmarkModelPath) >> landmarkDetector;
 
@@ -304,27 +224,23 @@ int main(int argc, char** argv) {
     cv::Mat t;
     //bilateralFilter(maskGF, t, dx, fc, fc);
     //t.copyTo(maskGF);
-    cv::imshow("maskGF", maskGF);
-
-
 
     cv::Mat tmp1, tmp2, noFace;
-
 
     // Inner mask
     cv::Mat maskEx;
     cv::Mat maskElement = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(30, 30)); //71 71
     //cv::imshow("maskElement", maskElement);
     cv::morphologyEx(maskImg, maskEx, cv::MORPH_ERODE, maskElement);
-    cv::Mat maskExs[3] = {maskEx, maskEx, maskEx};
+    cv::Mat maskExs[3] = { maskEx, maskEx, maskEx };
     cv::Mat maskEx3C;
     cv::merge(maskExs, 3, maskEx3C);
-    
-     // Make a preserved image for future use
+
+    // Make a preserved image for future use
     cv::Mat preservedImg, maskPres;
     cv::bitwise_not(maskEx3C, maskPres);
     cv::bitwise_and(workImg, maskPres, preservedImg);
-    
+
     // Spot Concealment
     // Convert the RGB image to a single channel gray image
     cv::Mat grayImg;
@@ -339,54 +255,143 @@ int main(int argc, char** argv) {
     cv::subtract(blurImg2, blurImg1, dogImg);
     cv::Mat not_dogImg;
     cv::bitwise_not(dogImg, not_dogImg);
-    cv::imshow("not_dogImg", not_dogImg);
+ 
     // Apply binary mask to the image
-    cv::Mat not_dogImgs[3] = {not_dogImg, not_dogImg, not_dogImg};
+    cv::Mat not_dogImgs[3] = { not_dogImg, not_dogImg, not_dogImg };
     cv::Mat not_dogImg3C;
     cv::merge(not_dogImgs, 3, not_dogImg3C);
 
     cv::Mat final_mask, final_mask_not;
     cv::bitwise_and(maskGF, not_dogImg3C, final_mask);
     cv::bitwise_not(final_mask, final_mask_not);
-    cv::imshow("final_mask", final_mask);
-    cv::imshow("final_mask_not", final_mask_not);
+
     cv::Mat final_face_not, final_face;
     cv::bitwise_and(workImg, final_mask, final_face);
     cv::bitwise_and(workImg, final_mask_not, final_face_not);
 
-    spotImg = final_face.clone();
-    /*int value1, value2;
-    std::cin >> value1;
-    std::cin >> value2;
-    int dx = value1 * 5;
-    double fc = value1 * 12.5;
-    */
+    return std::vector({ final_face, final_face_not, maskImgNot, noFace, inputImg });
+}
+
+cv::Mat smoothing(cv::Mat final_face, cv::Mat final_face_not,cv::Mat maskImgNot, cv::Mat noFace , cv::Mat inputImg)
+{
+    cv::Mat tmp1,tmp2;
+
     int dx = 5;
     double fc = 50;
-    //std::cin >> dx;
-    //std::cin >> fc;
-    bilateralFilter(spotImg, tmp1, dx, fc, fc);
 
-    //cv::Mat gmm;
-    //GMM(inputImg, gmm);
-
+    bilateralFilter(final_face, tmp1, dx, fc, fc);
 
     cv::bitwise_and(inputImg, maskImgNot, noFace);
-    cv::imshow("noFace", noFace);
-
 
     cv::add(final_face_not, tmp1, tmp2);
     cv::Mat dst;
     bilateralFilter(tmp2, dst, 5, 20, 20);
-    cv::imshow("dst", dst);
-    cv::imshow("workImg", workImg);
-    cv::imwrite("final.jpg", dst);
-  
+    return dst;
+}
+cv::Mat smoothing(std::vector<cv::Mat> masks)
+{
+    return smoothing(masks[0], masks[1], masks[2], masks[3], masks[4]);
+}
+
+std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
+{
+    cv::Mat bgrchannel_smoothed[3], bgrchannel_orig[3];
+
+    cv::split(smoothed.clone(), bgrchannel_smoothed);
+    cv::split(orig.clone(), bgrchannel_orig);
+    int J = 3;
+    cv::Mat double_smoothed, double_orig;
+    int N = smoothed.rows * smoothed.cols;
+    std::vector<cv::Mat> colors;
+    for (int color = 0; color < 3; ++color)
+    {
+        bgrchannel_smoothed[color].convertTo(double_smoothed, CV_64F);
+        bgrchannel_orig[color].convertTo(double_orig, CV_64F);
+        double* color_smoothed = double_smoothed.ptr<double>(0);
+        double* color_orig = double_orig.ptr<double>(0);
+        wave_object obj_smoothed, obj_orig;
+        wt2_object wt_smoothed, wt_orig;
+        
+        double* wavecoeffs_smoothed, * wavecoeffs_orig;
+        double* cHH1_smoothed, * cHH2_smoothed, * cHH3_smoothed, * cHH1_orig, * cHH2_orig, * cHH3_orig;
+        int i1r, i1c, i2r, i2c, i3r, i3c;
+        int is1r, is1c, is2r, is2c, is3r, is3c;
+
+        const char* name = "db2";
+        
+        obj_smoothed = wave_init(name);
+        obj_orig = wave_init(name);
+
+        wt_orig = wt2_init(obj_orig, "dwt", orig.rows, orig.cols, J);
+        wt_smoothed = wt2_init(obj_smoothed, "dwt", smoothed.rows, smoothed.cols, J);
+
+        wavecoeffs_orig = dwt2(wt_orig, color_orig);
+        wavecoeffs_smoothed = dwt2(wt_smoothed, color_smoothed);
+
+        cHH1_orig = getWT2Coeffs(wt_orig, wavecoeffs_orig, 1, 'D', &i1r, &i1c);
+        cHH2_orig = getWT2Coeffs(wt_orig, wavecoeffs_orig, 2, 'D', &i2r, &i2c);
+        cHH3_orig = getWT2Coeffs(wt_orig, wavecoeffs_orig, 3, 'D', &i3r, &i3c);
+
+        cHH1_smoothed = getWT2Coeffs(wt_smoothed, wavecoeffs_smoothed, 1, 'D', &is1r, &is1c);
+        cHH2_smoothed = getWT2Coeffs(wt_smoothed, wavecoeffs_smoothed, 2, 'D', &is2r, &is2c);
+        cHH3_smoothed = getWT2Coeffs(wt_smoothed, wavecoeffs_smoothed, 3, 'D', &is3r, &is3c);
+
+        //dispWT2Coeffs(cHH1s, i1r, i1c);
+        std::cout << is1r << " " << is1c << std::endl;
+
+        mid(cHH1_orig, cHH1_smoothed, is1r, is1c);
+        mid(cHH2_orig, cHH2_smoothed, is2r, is2c);
+        mid(cHH3_orig, cHH3_smoothed, is3r, is3c);
+        cv::Mat oupMat = cv::Mat::zeros(smoothed.rows, smoothed.cols, CV_64F);
+
+        double* oup = oupMat.ptr<double>(0);
+
+        idwt2(wt_smoothed, wavecoeffs_smoothed, oup);
+        
+        colors.push_back(oupMat);
+        std::cout << color << std::endl;
+        wave_free(obj_orig);
+        wt2_free(wt_orig);
+        free(wavecoeffs_orig);
+        free(wavecoeffs_smoothed);
+    }
+    //cv::Mat final_eachCh[3] = {colors[0], colors[1], colors[3]};
+    cv::Mat convertedMat_blue, convertedMat_green, convertedMat_red;
+    colors[0].convertTo(convertedMat_blue, CV_8U);
+    colors[1].convertTo(convertedMat_green, CV_8U);
+    colors[2].convertTo(convertedMat_red, CV_8U);
     
+    return std::vector({ convertedMat_blue, convertedMat_green, convertedMat_red });
+}
+
+int main(int argc, char** argv) {
+    
+    std::string imgDir = "2.jpg";
+    std::string modelDir = "shape_predictor_68_face_landmarks.dat";
+    
+  
+    std::vector<cv::Mat> masks = maskGenerate(imgDir, modelDir);
+  
+    cv::Mat orig = masks[4];
+    cv::Mat smoothed = smoothing(masks);
+    cv::imshow("orig", orig);
+    cv::imshow("smoothed", smoothed);
+
+    std::vector<cv::Mat> colors = split(orig, smoothed);
+    cv::Mat final_eachCh[3] = { colors[0], colors[1], colors[2] };
+    cv::Mat final_colors;
+    cv::merge(final_eachCh, 3, final_colors);
+
+    cv::imshow("FINALLY", final_colors);
+    
+    //cv::Mat final_colors;
+    //cv::merge(colors, 3, final_colors);
+
+    //cv::imshow("FINALLY", final_colors);
 
     
     ////////////////////////// Spliting into 1 color
-
+/*
     cv::Mat bgrchannel_smoothed[3], bgrchannel_orig[3];
 
     cv::split(dst.clone(), bgrchannel_smoothed);
@@ -551,8 +556,7 @@ int main(int argc, char** argv) {
    cv::imshow("FINALLY", final_colors);
 
 
-    cv::waitKey();
-    cv::destroyAllWindows();
+    
 
 
     // free blue 
@@ -581,5 +585,8 @@ int main(int argc, char** argv) {
     free(wavecoeffs_red_orig);
     free(wavecoeffs_red_smoothed);
     free(oup_red);
+    */
+    cv::waitKey();
+    cv::destroyAllWindows();
     return 0;
 }
