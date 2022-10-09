@@ -444,9 +444,9 @@ int main(int argc, char** argv) {
     //dispWT2Coeffs(cHH1s, i1r, i1c);
     std::cout << ibs1r << " " << ibs1c << std::endl;
 
-   //medianaa(cHH1_blue_orig, cHH1_blue_smoothed, ibs1r, ibs1c);
-   //medianaa(cHH2_blue_orig, cHH2_blue_smoothed, ibs2r, ibs2c);
-   //medianaa(cHH3_blue_orig, cHH3_blue_smoothed, ibs3r, ibs3c);
+   medianaa(cHH1_blue_orig, cHH1_blue_smoothed, ibs1r, ibs1c);
+   medianaa(cHH2_blue_orig, cHH2_blue_smoothed, ibs2r, ibs2c);
+   medianaa(cHH3_blue_orig, cHH3_blue_smoothed, ibs3r, ibs3c);
 
    oup_blue = (double*)calloc(N, sizeof(double));
    for (int i = 0; i < dst.rows; ++i) {
@@ -482,9 +482,9 @@ int main(int argc, char** argv) {
    cHH2_green_smoothed = getWT2Coeffs(wt_green_smoothed, wavecoeffs_green_smoothed, 2, 'D', &igs2r, &igs2c);
    cHH3_green_smoothed = getWT2Coeffs(wt_green_smoothed, wavecoeffs_green_smoothed, 3, 'D', &igs3r, &igs3c);
 
-   //medianaa(cHH1_green_orig, cHH1_green_smoothed, igs1r, igs1c);
-   //medianaa(cHH2_green_orig, cHH2_green_smoothed, igs2r, igs2c);
-   //medianaa(cHH3_green_orig, cHH3_green_smoothed, igs3r, igs3c);
+   medianaa(cHH1_green_orig, cHH1_green_smoothed, igs1r, igs1c);
+   medianaa(cHH2_green_orig, cHH2_green_smoothed, igs2r, igs2c);
+   medianaa(cHH3_green_orig, cHH3_green_smoothed, igs3r, igs3c);
 
    oup_green = (double*)calloc(N, sizeof(double));
    for (int i = 0; i < dst.rows; ++i) {
@@ -520,9 +520,9 @@ int main(int argc, char** argv) {
    cHH2_red_smoothed = getWT2Coeffs(wt_red_smoothed, wavecoeffs_red_smoothed, 2, 'D', &irs2r, &irs2c);
    cHH3_red_smoothed = getWT2Coeffs(wt_red_smoothed, wavecoeffs_red_smoothed, 3, 'D', &irs3r, &irs3c);
 
-   //medianaa(cHH1_red_orig, cHH1_red_smoothed, irs1r, irs1c);
-   //medianaa(cHH2_red_orig, cHH2_red_smoothed, irs2r, irs2c);
-   //medianaa(cHH3_red_orig, cHH3_red_smoothed, irs3r, irs3c);
+   medianaa(cHH1_red_orig, cHH1_red_smoothed, irs1r, irs1c);
+   medianaa(cHH2_red_orig, cHH2_red_smoothed, irs2r, irs2c);
+   medianaa(cHH3_red_orig, cHH3_red_smoothed, irs3r, irs3c);
 
    oup_red = (double*)calloc(N, sizeof(double));
    for (int i = 0; i < dst.rows; ++i) {
@@ -542,7 +542,8 @@ int main(int argc, char** argv) {
    final_green.convertTo(convertedMat_green, CV_8U);
    final_red.convertTo(convertedMat_red, CV_8U);
 
-   cv::Mat waveChannels[3] = { convertedMat_green, convertedMat_red, convertedMat_blue };
+   cv::Mat waveChannels[3] = { convertedMat_blue, convertedMat_green, convertedMat_red };
+
 
    cv::Mat final_colors;
    cv::merge(waveChannels, 3, final_colors);
