@@ -8,10 +8,9 @@
 #include <opencv2/ml.hpp>
 #include <wavelib.h>
 
-
-#include <ranges>
 #include <tinysplinecxx.h>
 #include <iostream>
+#include <newfilter.cpp>
 
 #include <cassert>
 #include <fstream>
@@ -21,6 +20,10 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
+
+// debugging libs
+#include <chrono>
+#include <typeinfo>
 
 double absmax(double* array, int N) {
     double max;
@@ -47,6 +50,18 @@ void mid(double* arr1, double* arr2, int row, int col)
         }
     }
 }
+
+/*bool compare(double* arr1, double* arr2, int row, int col)
+{
+    for (int i = 0; i < row; ++i) {
+        for (int j = 0; j < col; ++j) {
+
+            //arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) * 0.5;
+            if arr2[i * col + j] == arr1[i * col + j]
+            //std::cout  << i << " " << j << " " << row << " " << col <<" " << arr1[i * col + j] << std::endl;
+        }
+    }
+}*/
 
 std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
 {
@@ -102,38 +117,38 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     // Left eye:        42-47
     // Mouth:           48-67 (boundary:48-59)
     // clang-format on
-    const auto jaw = [](const auto i) { return i >= 0 && i <= 16; };
-    const auto rightEye = [](const auto i) { return i >= 36 && i <= 41; };
-    const auto leftEye = [](const auto i) { return i >= 42 && i <= 47; };
-    const auto mouthBoundary = [](const auto i) { return i >= 48 && i <= 59; };
 
-    const auto detect = [&](const auto& face) { return landmarkDetector(dlibImg, face); };
-    for (const auto& shape : faces | std::views::transform(detect)) {
+    for (const auto& face : faces ) {
         std::vector<tinyspline::real> knots;
+        const auto shape = landmarkDetector(dlibImg, face);
         // Join the landmark points on the boundary of facial features using cubic curve
-        const auto getCurve = [&]<typename T>(T predicate, const auto n) {
+
+        const auto getCurve = [&](int n, int nend) {
             knots.clear();
-            for (const auto i :
-                std::views::iota(0) | std::views::filter(predicate) | std::views::take(n)) {
+            
+            for (int i = n; i <= nend;++i) {
                 const auto& point = shape.part(i);
                 knots.push_back(point.x());
                 knots.push_back(point.y());
             }
+
             // Make a closed curve
             knots.push_back(knots[0]);
             knots.push_back(knots[1]);
             // Interpolate the curve
             auto spline = tinyspline::BSpline::interpolateCubicNatural(knots, 2);
+
             return spline;
         };
-
+      
         // Right eye cubic curve
         constexpr auto nEyeCurve = 6;
-        const auto rightEyeCurve = getCurve(rightEye, nEyeCurve);
+        const auto rightEyeCurve = getCurve(36, 41);
+
         // Sample landmark points from the curve
         constexpr auto eyePointNum = 25;
         std::array<cv::Point, eyePointNum> rightEyePts;
-        for (const auto i : std::views::iota(0, eyePointNum)) {
+        for (int i = 0; i < eyePointNum;++i) {
             const auto net = rightEyeCurve(1.0 / eyePointNum * i);
             const auto result = net.result();
             const auto x = result[0], y = result[1];
@@ -145,10 +160,10 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
 
 
         // Left eye cubic curve
-        const auto leftEyeCurve = getCurve(leftEye, nEyeCurve);
+        const auto leftEyeCurve = getCurve(42, 47);
         std::array<cv::Point, eyePointNum> leftEyePts;
         // Sample landmark points from the curve
-        for (const auto i : std::views::iota(0, eyePointNum)) {
+        for (int i = 0; i < eyePointNum;++i) {
             const auto net = leftEyeCurve(1.0 / eyePointNum * i);
             const auto result = net.result();
             const auto x = result[0], y = result[1];
@@ -160,11 +175,11 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
 
         // Mouth cubic curve
         constexpr auto nMouthCurve = 12;
-        const auto mouthCurve = getCurve(mouthBoundary, nMouthCurve);
+        const auto mouthCurve = getCurve(48, 59);
         constexpr auto mouthPointNum = 40;
         std::array<cv::Point, mouthPointNum> mouthPts;
         // Sample landmark points from the curve
-        for (const auto i : std::views::iota(0, mouthPointNum)) {
+        for (int i = 0; i < mouthPointNum; ++i) {
             const auto net = mouthCurve(1.0 / mouthPointNum * i);
             const auto result = net.result();
             const auto x = result[0], y = result[1];
@@ -177,7 +192,7 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
         // Estimate an ellipse that can complete the upper face region
         constexpr auto nJaw = 17;
         std::vector<cv::Point> lowerFacePts;
-        for (auto i : std::views::iota(0) | std::views::filter(jaw) | std::views::take(nJaw)) {
+        for (int i = 0; i < nJaw; ++i) {
             const auto& point = shape.part(i);
             const auto x = point.x(), y = point.y();
             drawLandmark(x, y);
@@ -201,7 +216,6 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
         cv::bitwise_not(maskImg, maskImg);
     }
 
-
     cv::Mat maskChannels[3] = { maskImg, maskImg, maskImg };
     cv::Mat maskImg3C;
     cv::merge(maskChannels, 3, maskImg3C);
@@ -215,17 +229,16 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     cv::bitwise_and(inputImg, maskImg3C, spotImgT);
 
 
-
+    cv::imwrite("maskImg3C.jpg", maskImg3C);
     cv::ximgproc::guidedFilter(spotImgT, maskImg3C, maskGF, 10, 200); //10 200
     cv::bitwise_not(maskGF, maskImgNot);
 
     cv::bitwise_and(inputImg, maskGF, spotImg);
-
     cv::Mat t;
     //bilateralFilter(maskGF, t, dx, fc, fc);
     //t.copyTo(maskGF);
 
-    cv::Mat tmp1, tmp2, noFace;
+    cv::Mat tmp1, tmp2;
 
     // Inner mask
     cv::Mat maskEx;
@@ -262,38 +275,41 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     cv::merge(not_dogImgs, 3, not_dogImg3C);
 
     cv::Mat final_mask, final_mask_not;
+    
     cv::bitwise_and(maskGF, not_dogImg3C, final_mask);
     cv::bitwise_not(final_mask, final_mask_not);
-
+    cv::imshow("final_mask", final_mask);
     cv::Mat final_face_not, final_face;
     cv::bitwise_and(workImg, final_mask, final_face);
     cv::bitwise_and(workImg, final_mask_not, final_face_not);
 
-    return std::vector({ final_face, final_face_not, maskImgNot, noFace, inputImg });
+    return std::vector({ final_face, final_face_not, maskImgNot, inputImg });
 }
 
-cv::Mat smoothing(cv::Mat final_face, cv::Mat final_face_not,cv::Mat maskImgNot, cv::Mat noFace , cv::Mat inputImg)
+cv::Mat smoothing(cv::Mat final_face, cv::Mat final_face_not,cv::Mat maskImgNot , cv::Mat inputImg)
 {
     cv::Mat tmp1,tmp2;
-
-    int dx = 5;
-    double fc = 50;
-
-    bilateralFilter(final_face, tmp1, dx, fc, fc);
-
+    cv::Mat noFace;
+    int dx = 4; // 5
+    double fc = 10; // 50
+    JointWMF filter;
+    tmp1 = filter.filter(final_face, final_face, dx, fc);
+    //bilateralFilter(final_face, tmp1, dx, fc, fc);
+    
     cv::bitwise_and(inputImg, maskImgNot, noFace);
-
+    
     cv::add(final_face_not, tmp1, tmp2);
-    cv::Mat dst;
-    bilateralFilter(tmp2, dst, 5, 20, 20);
-    return dst;
+
+    //dst = filter.filter(tmp2, tmp2, 2, 10);
+    //bilateralFilter(tmp2, dst, 5, 20, 20);
+    return tmp2.clone();
 }
 cv::Mat smoothing(std::vector<cv::Mat> masks)
 {
-    return smoothing(masks[0], masks[1], masks[2], masks[3], masks[4]);
+    return smoothing(masks[0], masks[1], masks[2], masks[3]);
 }
 
-std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
+std::vector<cv::Mat> restore( cv::Mat orig, cv::Mat smoothed, int alfa, int beta )
 {
     cv::Mat bgrchannel_smoothed[3], bgrchannel_orig[3];
 
@@ -338,10 +354,26 @@ std::vector<cv::Mat> split( cv::Mat orig, cv::Mat smoothed )
 
         //dispWT2Coeffs(cHH1s, i1r, i1c);
         //std::cout << is1r << " " << is1c << std::endl;
+        //std::cout << i1r << " " << i2r << " " << i3r << " " << i1c << " " << i2c << " " << i3c << " " << std::endl;
+        //std::cout << is1r << " " << is2r << " " << is3r << " " << is1c << " " << is2c << " " << is3c << " " << std::endl;
+        int rows = i1r;
+        int cols = i1c;
 
-        mid(cHH1_orig, cHH1_smoothed, is1r, is1c);
-        mid(cHH2_orig, cHH2_smoothed, is2r, is2c);
-        mid(cHH3_orig, cHH3_smoothed, is3r, is3c);
+        cv::Mat cHH1_orig_mat(i1r, i1c, CV_64F, cHH1_orig);
+        cv::Mat cHH2_orig_mat(i2r, i2c, CV_64F, cHH2_orig);
+        cv::Mat cHH3_orig_mat(i3r, i3c, CV_64F, cHH3_orig);
+
+        cv::Mat cHH1_smoothed_mat(i1r, i1c, CV_64F, cHH1_smoothed);
+        cv::Mat cHH2_smoothed_mat(i2r, i2c, CV_64F, cHH2_smoothed);
+        cv::Mat cHH3_smoothed_mat(i3r, i3c, CV_64F, cHH3_smoothed);
+
+        cv::addWeighted(cHH1_orig_mat, alfa, cHH1_smoothed_mat, beta, 0, cHH1_smoothed_mat);
+        cv::addWeighted(cHH2_orig_mat, alfa, cHH2_smoothed_mat, beta, 0, cHH2_smoothed_mat);
+        cv::addWeighted(cHH3_orig_mat, alfa, cHH3_smoothed_mat, beta, 0, cHH3_smoothed_mat);
+        
+        //mid(cHH1_orig, cHH1_smoothed, is1r, is1c);
+        //mid(cHH2_orig, cHH2_smoothed, is2r, is2c);
+        //mid(cHH3_orig, cHH3_smoothed, is3r, is3c);
         cv::Mat oupMat = cv::Mat::zeros(smoothed.rows, smoothed.cols, CV_64F);
 
         double* oup = oupMat.ptr<double>(0);
@@ -370,21 +402,40 @@ int main(int argc, char** argv) {
     std::cout << "Dir: ";
     std::cin >> imgDir;
     std::string modelDir = "shape_predictor_68_face_landmarks.dat";
-    
-  
+
+    auto generator_start = chrono::system_clock::now();
     std::vector<cv::Mat> masks = maskGenerate(imgDir, modelDir);
-  
-    cv::Mat orig = masks[4];
+    auto generator_end = chrono::system_clock::now();
+    
+    cv::Mat orig = masks[3];
+
+    auto smoothing_start = chrono::system_clock::now();
     cv::Mat smoothed = smoothing(masks);
+    auto smoothing_end = chrono::system_clock::now();
+
     cv::imshow("orig", orig);
     cv::imshow("smoothed", smoothed);
 
-    std::vector<cv::Mat> colors = split(orig, smoothed);
+    double alfa, beta;
+    alfa = 0.9;
+    beta = 1 - alfa;
+
+    auto restore_start = chrono::system_clock::now();
+    std::vector<cv::Mat> colors = restore(orig, smoothed, alfa, beta);
+    auto restore_end = chrono::system_clock::now();
+    float restoreTime = float(chrono::duration_cast <chrono::microseconds> (restore_end - restore_start).count());
+    float generatorTime = float(chrono::duration_cast <chrono::microseconds> (generator_end - generator_start).count());
+    float smoothingTime = float(chrono::duration_cast <chrono::microseconds> (smoothing_end - smoothing_start).count());
+    
+    cout << "Elapsed Time for Mask Generator: " << generatorTime / 1000000 << " S \n" << std::endl;
+    cout << "Elapsed Time for Smoothing: " << smoothingTime / 1000000 << " S \n" << std::endl;
+    cout << "Elapsed Time for Restoration: " << restoreTime / 1000000 << " S \n" << std::endl;
+
     cv::Mat final_eachCh[3] = { colors[0], colors[1], colors[2] };
     cv::Mat final_colors;
     cv::merge(final_eachCh, 3, final_colors);
 
-    cv::imshow("FINALLY", final_colors);
+    cv::imshow("oup", final_colors);
     
     cv::waitKey();
     cv::destroyAllWindows();
