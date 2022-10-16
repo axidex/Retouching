@@ -6,6 +6,7 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/ximgproc/edge_filter.hpp>
 #include <opencv2/ml.hpp>
+#include <opencv2/photo.hpp>
 #include <wavelib.h>
 
 #include <tinysplinecxx.h>
@@ -25,43 +26,28 @@
 #include <chrono>
 #include <typeinfo>
 
-double absmax(double* array, int N) {
-    double max;
-    int i;
-
-    max = 0.0;
-    for (i = 0; i < N; ++i) {
-        if (fabs(array[i]) >= max) {
-            max = fabs(array[i]);
-        }
-    }
-
-    return max;
-}
-
-void mid(double* arr1, double* arr2, int row, int col)
+class Parallel_pixel_opencv : public ParallelLoopBody
 {
-    for (int i = 0; i < row; ++i) {
-        for (int j = 0; j < col; ++j) {
-            
-            //arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) * 0.5;
-            arr2[i * col + j] = arr1[i * col + j];
-            //std::cout  << i << " " << j << " " << row << " " << col <<" " << arr1[i * col + j] << std::endl;
+private:
+    uchar* p;
+public:
+    Parallel_pixel_opencv(uchar* ptr) : p(ptr) {}
+
+    virtual void operator()(const Range& r) const
+    {
+        for (int i = r.start; i != r.end; ++i)
+        {
+            if (p[i] >= 230)
+            {
+                p[i] = 255;
+            }
+            else
+            {
+                p[i] = 0;
+            }
         }
     }
-}
-
-/*bool compare(double* arr1, double* arr2, int row, int col)
-{
-    for (int i = 0; i < row; ++i) {
-        for (int j = 0; j < col; ++j) {
-
-            //arr2[i * col + j] = (arr1[i * col + j] + arr2[i * col + j]) * 0.5;
-            if arr2[i * col + j] == arr1[i * col + j]
-            //std::cout  << i << " " << j << " " << row << " " << col <<" " << arr1[i * col + j] << std::endl;
-        }
-    }
-}*/
+};
 
 std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
 {
@@ -158,7 +144,6 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
         // Draw binary mask
         cv::fillConvexPoly(maskImg, rightEyePts, cv::Scalar(255), cv::LINE_AA);
 
-
         // Left eye cubic curve
         const auto leftEyeCurve = getCurve(42, 47);
         std::array<cv::Point, eyePointNum> leftEyePts;
@@ -228,8 +213,7 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     //std::cin >> b;
     cv::bitwise_and(inputImg, maskImg3C, spotImgT);
 
-
-    cv::imwrite("maskImg3C.jpg", maskImg3C);
+    //cv::imwrite("maskImg3C.jpg", maskImg3C);
     cv::ximgproc::guidedFilter(spotImgT, maskImg3C, maskGF, 10, 200); //10 200
     cv::bitwise_not(maskGF, maskImgNot);
 
@@ -277,8 +261,15 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     cv::Mat final_mask, final_mask_not;
     
     cv::bitwise_and(maskGF, not_dogImg3C, final_mask);
-    cv::bitwise_not(final_mask, final_mask_not);
+    
+    cv::Size s = final_mask.size();
+    int N = s.width * s.height * 3;
+    uchar* p = final_mask.data;
+    
+    cv::parallel_for_(Range(0, N), Parallel_pixel_opencv(p));
+    //std::cout << final_mask;
     cv::imshow("final_mask", final_mask);
+    cv::bitwise_not(final_mask, final_mask_not);
     cv::Mat final_face_not, final_face;
     cv::bitwise_and(workImg, final_mask, final_face);
     cv::bitwise_and(workImg, final_mask_not, final_face_not);
@@ -286,20 +277,22 @@ std::vector<cv::Mat> maskGenerate(std::string imgDir, std::string modelDir)
     return std::vector({ final_face, final_face_not, maskImgNot, inputImg });
 }
 
-cv::Mat smoothing(cv::Mat final_face, cv::Mat final_face_not,cv::Mat maskImgNot , cv::Mat inputImg)
+cv::Mat smoothing(cv::Mat final_face, cv::Mat final_face_not, cv::Mat maskImgNot, cv::Mat inputImg)
 {
-    cv::Mat tmp1,tmp2;
+    cv::Mat tmp1, tmp2, dst, tmp3;
     cv::Mat noFace;
-    int dx = 4; // 5
-    double fc = 10; // 50
+    int dx = 5; // 5
+    double fc = 20; // 50
     JointWMF filter;
     tmp1 = filter.filter(final_face, final_face, dx, fc);
     //bilateralFilter(final_face, tmp1, dx, fc, fc);
     
-    cv::bitwise_and(inputImg, maskImgNot, noFace);
-    
+    //cv::fastNlMeansDenoisingColored(tmp1, tmp3, 1, 1, 7, 21);
+    //std::cout << final_face_not.size() << " " << tmp3.size() << std::endl;
     cv::add(final_face_not, tmp1, tmp2);
+    
 
+    
     //dst = filter.filter(tmp2, tmp2, 2, 10);
     //bilateralFilter(tmp2, dst, 5, 20, 20);
     return tmp2.clone();
@@ -395,48 +388,38 @@ std::vector<cv::Mat> restore( cv::Mat orig, cv::Mat smoothed, int alfa, int beta
     
     return std::vector({ convertedMat_blue, convertedMat_green, convertedMat_red });
 }
-
 int main(int argc, char** argv) {
-    
+
     std::string imgDir;
     std::cout << "Dir: ";
     std::cin >> imgDir;
     std::string modelDir = "shape_predictor_68_face_landmarks.dat";
 
-    auto generator_start = chrono::system_clock::now();
     std::vector<cv::Mat> masks = maskGenerate(imgDir, modelDir);
-    auto generator_end = chrono::system_clock::now();
-    
+
     cv::Mat orig = masks[3];
 
-    auto smoothing_start = chrono::system_clock::now();
     cv::Mat smoothed = smoothing(masks);
-    auto smoothing_end = chrono::system_clock::now();
+
 
     cv::imshow("orig", orig);
     cv::imshow("smoothed", smoothed);
 
     double alfa, beta;
-    alfa = 0.9;
+    alfa = 1;
     beta = 1 - alfa;
-
-    auto restore_start = chrono::system_clock::now();
+ 
     std::vector<cv::Mat> colors = restore(orig, smoothed, alfa, beta);
-    auto restore_end = chrono::system_clock::now();
-    float restoreTime = float(chrono::duration_cast <chrono::microseconds> (restore_end - restore_start).count());
-    float generatorTime = float(chrono::duration_cast <chrono::microseconds> (generator_end - generator_start).count());
-    float smoothingTime = float(chrono::duration_cast <chrono::microseconds> (smoothing_end - smoothing_start).count());
-    
-    cout << "Elapsed Time for Mask Generator: " << generatorTime / 1000000 << " S \n" << std::endl;
-    cout << "Elapsed Time for Smoothing: " << smoothingTime / 1000000 << " S \n" << std::endl;
-    cout << "Elapsed Time for Restoration: " << restoreTime / 1000000 << " S \n" << std::endl;
+
 
     cv::Mat final_eachCh[3] = { colors[0], colors[1], colors[2] };
     cv::Mat final_colors;
     cv::merge(final_eachCh, 3, final_colors);
+    std::string f = "final_";
+    std::string oup_name = f + imgDir;
+    cv::imwrite(oup_name, final_colors);
+    cv::imshow("final_colors", final_colors);
 
-    cv::imshow("oup", final_colors);
-    
     cv::waitKey();
     cv::destroyAllWindows();
     return 0;
